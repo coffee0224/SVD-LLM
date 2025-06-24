@@ -57,11 +57,13 @@ class SVDLinearV1(nn.Module):
         sqrtSigma = torch.sqrt(truc_sigma)
         svd_u = torch.matmul(truc_u, sqrtSigma).to(dtype)
         svd_v = torch.matmul(sqrtSigma, truc_v).to(dtype)
-        self.u_proj = svd_u
-        self.v_proj = svd_v
+        self.u_proj = nn.Linear(num_s_after_trunc, W.shape[1], bias=False, dtype=dtype)
+        self.v_proj = nn.Linear(W.shape[0], num_s_after_trunc, bias=False, dtype=dtype)
+        self.u_proj.weight.data = svd_u
+        self.v_proj.weight.data = svd_v
 
     def forward(self, x: torch.Tensor):
-        return (x @ self.u_proj) @ self.v_proj
+        return self.u_proj(self.v_proj(x))
 
     def state_dict_keys(self):
         return set(

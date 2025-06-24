@@ -66,6 +66,13 @@ class SVDModel:
     def patch_model(
         cls, model, mat_dict, patch_linear_fn: Callable, patch_other_fn: Callable
     ):
+        def find_parent(model, name: str) -> nn.Module:
+            module_tree = name.split(".")[:-1]
+            parent = model
+            for m in module_tree:
+                parent = parent._modules[m]
+            return parent
+
         model.eval()
         for param in model.parameters():
             param.requires_grad = False
@@ -80,13 +87,6 @@ class SVDModel:
             layer = layers[i]
             subset = find_layers(layer)
 
-            def find_parent(model, name: str) -> nn.Module:
-                module_tree = name.split(".")[:-1]
-                parent = model
-                for m in module_tree:
-                    parent = parent._modules[m]
-                return parent
-
             for name, module in subset.items():
                 mat = mat_dict[i][name] if mat_dict else None
                 if isinstance(module, nn.Linear):
@@ -99,7 +99,9 @@ class SVDModel:
         ignore_tags = cls.get_ignore_layers(model)
         tmp_mapping = {}
         for name, module in model.named_modules():
-            if (type(module) not in _COMPRESSED_LAYERS) and (name not in ignore_tags):
+            if (name not in ignore_tags) and (
+                name == "lm_head" or (type(module) not in _COMPRESSED_LAYERS)
+            ):
                 tmp_mapping[name] = module
 
         for name in tqdm(tmp_mapping, desc="Patching other modules"):
