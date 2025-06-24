@@ -15,10 +15,15 @@ from .utils.model_utils import find_layers
 from .core.svd import SVDLinearV1 as SVDLinear
 
 _COMPRESSED_LAYERS = [nn.Linear, SVDLinear]
+_SVD_MODULES = [SVDLinear]
 
 
 def is_leaf_module(module) -> bool:
     return len(module._modules) == 0
+
+
+def is_svd_module(module) -> bool:
+    return type(module) in _SVD_MODULES
 
 
 class SVDModel:
@@ -74,6 +79,7 @@ class SVDModel:
             return parent
 
         model.eval()
+        cls.autoname_modules(model)
         for param in model.parameters():
             param.requires_grad = False
         try:
@@ -175,12 +181,7 @@ class SVDModel:
 
     # Create empty model from config
     @classmethod
-    def create_model(cls, save_dir, kwargs):
-        model_kwargs = {}
-        for key in ["attn_implementation"]:
-            if key in kwargs:
-                model_kwargs[key] = kwargs[key]
-
+    def create_model(cls, save_dir):
         config = transformers.AutoConfig.from_pretrained(cls.get_config_file(save_dir))
 
         auto_class = transformers.AutoModel
@@ -194,7 +195,7 @@ class SVDModel:
                 auto_class = transformers.AutoModelForSequenceClassification
 
         with init_empty_weights():
-            model = auto_class.from_config(config, **model_kwargs)
+            model = auto_class.from_config(config)
 
         return model
 
@@ -223,7 +224,7 @@ class SVDModel:
     def get_ignore_layers(cls, model) -> list:
         layers = {""}
         for name, module in model.named_modules():
-            if not is_leaf_module(module):
+            if not is_leaf_module(module) and not is_svd_module(module):
                 layers.add(name)
         return list(layers)
 
@@ -256,12 +257,9 @@ class SVDModel:
         # Track save directory
         model.save_dir = save_dir
 
-        # Name the layers
-        cls.setup_model(model)
-
         # Load weights
         try:
-            weights = cls.load_weights(save_dir, device)
+            weights = cls.load_weights(save_dir)
         except Exception:
             print("Failed to load the weights")
             raise FileNotFoundError
@@ -277,6 +275,7 @@ class SVDModel:
                 module = SVDLinear(
                     linear_layer=None,
                     scaling_diag_matrix=None,
+                    ratio=None,
                     device=device,
                     compute_dtype=compute_dtype,
                     initialize=False,
@@ -297,7 +296,7 @@ class SVDModel:
 
             return module
 
-        cls.patch_model(model, None, _load_module, _load_module())
+        cls.patch_model(model, None, _load_module, _load_module)
 
         model.svd_compressed = True
 
@@ -305,3 +304,16 @@ class SVDModel:
         model.base_class = cls
 
         return model
+
+    # Load weights from disk
+    @classmethod
+    def load_weights(cls, save_dir: str, map_location=None):
+        return torch.load(
+            cls.get_weight_file(save_dir), map_location=map_location, weights_only=True
+        )
+
+    # Autmatically name modules. This is very important to save/load the weights
+    @classmethod
+    def autoname_modules(cls, model) -> None:
+        for name, module in model.named_modules():
+            module.name = name
