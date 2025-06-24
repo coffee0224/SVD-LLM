@@ -7,15 +7,17 @@ class SVDLinearV1(nn.Module):
         self,
         linear_layer: nn.Module,
         scaling_diag_matrix: torch.Tensor,
-        radio: float = 0.6,
+        ratio: float,
+        compute_dtype=torch.float16,
         device: str = "cpu",
         initialize: bool = True,
     ):
         super().__init__()
         self.linear_layer = linear_layer
         self.scaling_diag_matrix = scaling_diag_matrix
-        self.ratio = radio
+        self.ratio = ratio
         self.device = device
+        self.compute_dtype = compute_dtype
         self.u_proj = None
         self.v_proj = None
         if initialize:
@@ -29,7 +31,7 @@ class SVDLinearV1(nn.Module):
             return
 
         W = self.linear_layer.weight.data.float().to(self.device)
-        dtype = W.dtype
+        dtype = self.compute_dtype
         scaling_diag_matrix = self.scaling_diag_matrix.to(self.device)
         try:
             scaling_matrix_inv = torch.linalg.inv(scaling_diag_matrix)
@@ -53,36 +55,40 @@ class SVDLinearV1(nn.Module):
         truc_sigma = torch.diag(truc_s)
         #### Replace Attn, MLP ####
         sqrtSigma = torch.sqrt(truc_sigma)
-        svd_u = torch.matmul(truc_u, sqrtSigma).cpu().to(dtype)
-        svd_v = torch.matmul(sqrtSigma, truc_v).cpu().to(dtype)
+        svd_u = torch.matmul(truc_u, sqrtSigma).to(dtype)
+        svd_v = torch.matmul(sqrtSigma, truc_v).to(dtype)
         self.u_proj = svd_u
         self.v_proj = svd_v
 
-        W = W_scale = scaling_matrix_inv = scaling_diag_matrix = U = S = VT = truc_s = (
-            truc_u
-        ) = truc_v = sqrtSigma = None
-        del (
-            W,
-            W_scale,
-            scaling_matrix_inv,
-            scaling_diag_matrix,
-            U,
-            S,
-            VT,
-            truc_s,
-            truc_u,
-            truc_v,
-            sqrtSigma,
-            self.linear_layer,
-            self.scaling_diag_matrix,
+    def forward(self, x: torch.Tensor):
+        return (x @ self.u_proj) @ self.v_proj
+
+    def state_dict_keys(self):
+        return set(
+            [
+                "u_proj",
+                "v_proj",
+                "ratio",
+            ]
         )
 
-    def forward(self, x: torch.Tensor):
+    def state_dict(self):
         if not self.is_initialized():
-            raise RuntimeError(
-                "SVDLinearV1 is not initialized. Call initialize() first."
-            )
-        x.to(self.device)
-        u_proj = self.u_proj.to(self.device)
-        v_proj = self.v_proj.to(self.device)
-        return u_proj @ (v_proj @ x)
+            return {k: None for k in self.state_dict_keys()}
+
+        state = {
+            "u_proj": self.u_proj,
+            "v_proj": self.v_proj,
+            "ratio": self.ratio,
+        }
+        return state
+
+    def load_state_dict(self, state_dict, strict=True, assign=False):
+        self.u_proj = state_dict.pop("u_proj")
+        self.v_proj = state_dict.pop("v_proj")
+        self.ratio = state_dict.pop("ratio")
+        self.compute_dtype = state_dict.pop("compute_dtype")
+        self.u_proj = self.u_proj.to(self.compute_dtype)
+        self.v_proj = self.v_proj.to(self.compute_dtype)
+        self.u_proj.to(self.device)
+        self.v_proj.to(self.device)
