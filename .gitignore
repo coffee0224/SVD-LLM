@@ -1,5 +1,5 @@
-.vscode/*
-cache/*
+/.vscode/
+/cache/
 **/__pycache__
 utils/c4-*
 /.venv/
