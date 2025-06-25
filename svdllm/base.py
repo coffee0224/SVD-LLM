@@ -181,7 +181,11 @@ class SVDModel:
 
     # Create empty model from config
     @classmethod
-    def create_model(cls, save_dir):
+    def create_model(cls, save_dir, kwargs):
+        model_kwargs = {}
+        for key in ["attn_implementation"]:
+            if key in kwargs:
+                model_kwargs[key] = kwargs[key]
         config = transformers.AutoConfig.from_pretrained(cls.get_config_file(save_dir))
 
         auto_class = transformers.AutoModel
@@ -195,7 +199,7 @@ class SVDModel:
                 auto_class = transformers.AutoModelForSequenceClassification
 
         with init_empty_weights():
-            model = auto_class.from_config(config)
+            model = auto_class.from_config(config, **model_kwargs)
 
         return model
 
@@ -243,7 +247,11 @@ class SVDModel:
 
     @classmethod
     def from_compressed(
-        cls, save_dir: str, compute_dtype=torch.float16, device: str = "cuda"
+        cls,
+        save_dir: str,
+        compute_dtype=torch.float16,
+        device: str = "cuda",
+        **kwargs,
     ):
         # Check
         if not os.path.exists(cls.get_weight_file(save_dir)):
@@ -252,7 +260,7 @@ class SVDModel:
             raise Exception("Config file missing. Check your cache directory.")
 
         # Load model from config
-        model = cls.create_model(save_dir)
+        model = cls.create_model(save_dir, kwargs)
 
         # Track save directory
         model.save_dir = save_dir
