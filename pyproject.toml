@@ -1,7 +1,7 @@
 [project]
 name = "svd-llm"
 version = "0.1.0"
-requires-python = "==3.10.0"
+requires-python = ">=3.10.0"
 dependencies = [
     "accelerate>=1.8.1",
     "datasets>=3.6.0",
@@ -11,5 +11,16 @@ dependencies = [
     "sentencepiece>=0.2.0",
     "torch>=2.7.1",
     "tqdm>=4.67.1",
-    "transformers==4.47.1",
+    "transformers>=4.47.1",
 ]
+
+[build-system]
+requires = ["uv_build>=0.7.14,<0.8.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = true
+
+[tool.uv.build-backend]
+module-name ="svdllm"
+module-root = "."
