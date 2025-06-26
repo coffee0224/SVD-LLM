@@ -2,22 +2,24 @@ from torch import nn
 import torch
 
 
-class SVDLinearV1(nn.Module):
+class SVDLinear(nn.Module):
     def __init__(
         self,
         linear_layer: nn.Module,
-        scaling_diag_matrix: torch.Tensor,
+        calib_matrix: torch.Tensor,
         ratio: float,
         compute_dtype=torch.float16,
+        svd_version: str = "v1",
         device: str = "cpu",
         initialize: bool = True,
     ):
         super().__init__()
         self.linear_layer = linear_layer
-        self.scaling_diag_matrix = scaling_diag_matrix
+        self.calib_matrix = calib_matrix
         self.ratio = ratio
         self.device = device
         self.compute_dtype = compute_dtype
+        self.svd_version = svd_version
         self.svd_u_proj = None
         self.svd_v_proj = None
         self.low_rank = None
@@ -33,6 +35,15 @@ class SVDLinearV1(nn.Module):
         if self.is_initialized():
             return
 
+        match self.svd_version:
+            case "v1":
+                self.svd_v1_initialize()
+            case "v2":
+                self.svd_v2_initialize()
+            case _:
+                raise ValueError(f"Unsupported SVD version: {self.svd_version}")
+
+    def svd_v1_initialize(self):
         W = self.linear_layer.weight.data.float().to(self.device)
         dtype = self.compute_dtype
         self.in_size = W.shape[0]
@@ -42,7 +53,7 @@ class SVDLinearV1(nn.Module):
         )
         self.low_rank = num_s_after_trunc
 
-        scaling_diag_matrix = self.scaling_diag_matrix.to(self.device)
+        scaling_diag_matrix = self.calib_matrix.to(self.device)
         try:
             scaling_matrix_inv = torch.linalg.inv(scaling_diag_matrix)
         except Exception:
@@ -74,86 +85,9 @@ class SVDLinearV1(nn.Module):
         self.svd_u_proj.weight.data = svd_u
         self.svd_v_proj.weight.data = svd_v
 
-        del self.linear_layer, scaling_diag_matrix
+        del self.linear_layer, self.calib_matrix
 
-    def forward(self, x: torch.Tensor):
-        return self.svd_u_proj(self.svd_v_proj(x))
-
-    def state_dict_keys(self):
-        return set(
-            [
-                "svd_u_proj",
-                "svd_v_proj",
-                "ratio",
-                "in_size",
-                "out_size",
-                "low_rank",
-            ]
-        )
-
-    def state_dict(self):
-        if not self.is_initialized():
-            return {k: None for k in self.state_dict_keys()}
-
-        state = {
-            "svd_u_proj": self.svd_u_proj.weight.data,
-            "svd_v_proj": self.svd_v_proj.weight.data,
-            "ratio": self.ratio,
-            "in_size": self.in_size,
-            "out_size": self.out_size,
-            "low_rank": self.low_rank,
-        }
-        return state
-
-    def load_state_dict(self, state_dict, strict=True, assign=False):
-        self.ratio = state_dict.pop("ratio")
-        self.in_size = state_dict.pop("in_size")
-        self.out_size = state_dict.pop("out_size")
-        self.low_rank = state_dict.pop("low_rank")
-
-        self.svd_u_proj = nn.Linear(
-            self.low_rank, self.out_size, bias=False, dtype=self.compute_dtype
-        )
-        self.svd_v_proj = nn.Linear(
-            self.in_size, self.low_rank, bias=False, dtype=self.compute_dtype
-        )
-        self.svd_u_proj.weight.data = state_dict.pop("svd_u_proj")
-        self.svd_v_proj.weight.data = state_dict.pop("svd_v_proj")
-        self.svd_v_proj.to(device=self.device, dtype=self.compute_dtype)
-        self.svd_u_proj.to(device=self.device, dtype=self.compute_dtype)
-
-
-class SVDLinearV2(nn.Module):
-    def __init__(
-        self,
-        linear_layer: nn.Module,
-        calib_matrix: torch.Tensor,
-        ratio: float,
-        compute_dtype=torch.float16,
-        device: str = "cpu",
-        initialize: bool = True,
-    ):
-        super().__init__()
-        self.linear_layer = linear_layer
-        self.calib_matrix = calib_matrix
-        self.ratio = ratio
-        self.device = device
-        self.compute_dtype = compute_dtype
-        self.svd_u_proj = None
-        self.svd_v_proj = None
-        self.low_rank = None
-        self.in_size = None
-        self.out_size = None
-        if initialize:
-            self.initialize()
-
-    def is_initialized(self):
-        return False if (None in [self.svd_u_proj, self.svd_v_proj]) else True
-
-    def initialize(self):
-        if self.is_initialized():
-            return
-
+    def svd_v2_initialize(self):
         W = self.linear_layer.weight.data.float().to(self.device)
         dtype = self.compute_dtype
         self.in_size = W.shape[0]

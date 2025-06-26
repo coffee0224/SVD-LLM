@@ -12,10 +12,11 @@ from .utils.data_utils import get_calib_train_data
 from .utils.model_utils import find_layers
 
 # TODO add SVDLinearV2
-from .core.svd import SVDLinearV1, SVDLinearV2
+from .core.svd import SVDLinear
 
-_COMPRESSED_LAYERS = [nn.Linear, SVDLinearV1, SVDLinearV2]
-_SVD_MODULES = [SVDLinearV1, SVDLinearV2]
+_COMPRESSED_LAYERS = [nn.Linear, SVDLinear]
+_SVD_MODULES = [SVDLinear]
+_SUPPORT_SVD_VERSION = ["v1", "v2"]
 
 
 def is_leaf_module(module) -> bool:
@@ -37,15 +38,11 @@ class SVDModel:
         nsamples: int = 256,
         seqlen: int = 2048,
         compute_dtype=torch.float16,
-        svd_version: int = 1,  # 1 for SVDLinearV1, 2 for SVDLinearV2
+        svd_version: str = "v1",  # v1 for SVD-LLM, v2 for SVD-LLM V2
         device: str = "cpu",
     ):
-        if svd_version == 1:
-            SVDLinear = SVDLinearV1
-        elif svd_version == 2:
-            SVDLinear = SVDLinearV2
-        else:
-            raise ValueError("svd_version must be 1 or 2")
+        if svd_version not in _SUPPORT_SVD_VERSION:
+            raise ValueError("svd_version must be v1 or v2")
 
         calib_data = get_calib_train_data(
             calib_dataset, tokenizer, nsamples, seqlen, device
@@ -61,6 +58,7 @@ class SVDModel:
                 linear_layer,
                 matrix,
                 ratio,
+                svd_version=svd_version,
                 compute_dtype=compute_dtype,
                 device=device,
             )
@@ -153,7 +151,7 @@ class SVDModel:
                 module._forward_hooks.clear()
         profiling_mat = {}
 
-        if svd_version == 1:
+        if svd_version == "v1":
             for i in tqdm(range(len(layers)), desc="Whitening data"):
                 layer_profile = {}
                 subset = find_layers(layers[i])
@@ -166,8 +164,7 @@ class SVDModel:
                             raw_scaling_diag_matrix
                         )
                     except Exception:
-                        # TODO use log replace print
-                        print("Warning: eigen scaling_diag_matrix is not positive!")
+                        # print("Warning: eigen scaling_diag_matrix is not positive!")
                         eigenvalues = torch.linalg.eigvalsh(raw_scaling_diag_matrix)
                         raw_scaling_diag_matrix += (-eigenvalues[0] + 1e-6) * torch.eye(
                             raw_scaling_diag_matrix.shape[0]
@@ -179,7 +176,7 @@ class SVDModel:
                         del eigenvalues
                     layer_profile[name] = scaling_diag_matrix
                 profiling_mat[i] = layer_profile
-        elif svd_version == 2:
+        elif svd_version == "v2":
             for i in range(len(layers)):
                 layer_profile = {}
                 subset = find_layers(layers[i])
@@ -290,12 +287,9 @@ class SVDModel:
         model = cls.create_model(save_dir, kwargs)
 
         svd_version = model.config.svd_version
-        if svd_version == 1:
-            SVDLinear = SVDLinearV1
-        elif svd_version == 2:
-            SVDLinear = SVDLinearV2
-        else:
-            raise ValueError("svd_version must be 1 or 2")
+
+        if svd_version not in _SUPPORT_SVD_VERSION:
+            raise ValueError("svd_version must be v1 or v2")
 
         # Track save directory
         model.save_dir = save_dir
@@ -320,6 +314,7 @@ class SVDModel:
                     None,
                     ratio=None,
                     device=device,
+                    svd_version=svd_version,
                     compute_dtype=compute_dtype,
                     initialize=False,
                 )
