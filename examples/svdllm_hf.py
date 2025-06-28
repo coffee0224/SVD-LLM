@@ -16,20 +16,24 @@ tokenizer = AutoTokenizer.from_pretrained(model_path)
 
 # all model.layers.*.mlp.down/up/gate_proj will be compressed at ratio
 ratio = {
-    "mlp.down_proj": 0.6,
-    "mlp.up_proj": 0.6,
-    "mlp.gate_proj": 0.6,
+    "mlp.down_proj": 0.2,
+    "mlp.up_proj": 0.2,
+    "mlp.gate_proj": 0.2,
+    "self_attn.q_proj": 0.8,
+    "self_attn.k_proj": 0.8,
+    "self_attn.v_proj": 0.8,
+    "self_attn.o_proj": 0.8,
 }
 
 # all model.layers.*.mlp.down/up/gate_proj will be compressed at ratio 0.8 except model.layers.0
-ratio = {
-    "model.layers.0.mlp.down_proj": 0.6,
-    "model.layers.0.mlp.up_proj": 0.6,
-    "model.layers.0.mlp.gate_proj": 0.6,
-    "mlp.gate_proj": 0.2,
-    "mlp.up_proj": 0.2,
-    "mlp.down_proj": 0.2,
-}
+# ratio = {
+#     "model.layers.0.mlp.down_proj": 0.6,
+#     "model.layers.0.mlp.up_proj": 0.6,
+#     "model.layers.0.mlp.gate_proj": 0.6,
+#     "mlp.gate_proj": 0.2,
+#     "mlp.up_proj": 0.2,
+#     "mlp.down_proj": 0.2,
+# }
 
 
 SVDModel.compress(model, tokenizer, ratio=ratio, svd_version="v1", device=device)
