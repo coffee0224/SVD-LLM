@@ -44,6 +44,20 @@ class SVDLinear(nn.Module):
                 raise ValueError(f"Unsupported SVD version: {self.svd_version}")
 
     def svd_v1_initialize(self):
+        def whitening(raw_scaling_diag_matrix):
+            raw_scaling_diag_matrix = raw_scaling_diag_matrix.double().to(self.device)
+            try:
+                scaling_diag_matrix = torch.linalg.cholesky(raw_scaling_diag_matrix)
+            except Exception:
+                # print("Warning: eigen scaling_diag_matrix is not positive!")
+                eigenvalues = torch.linalg.eigvalsh(raw_scaling_diag_matrix)
+                raw_scaling_diag_matrix += (-eigenvalues[0] + 1e-6) * torch.eye(
+                    raw_scaling_diag_matrix.shape[0]
+                ).to(self.device)
+                scaling_diag_matrix = torch.linalg.cholesky(raw_scaling_diag_matrix)
+                del eigenvalues
+            return scaling_diag_matrix
+
         W = self.linear_layer.weight.data.float().to(self.device)
         dtype = self.compute_dtype
         self.in_size = W.shape[0]
@@ -53,7 +67,7 @@ class SVDLinear(nn.Module):
         )
         self.low_rank = num_s_after_trunc
 
-        scaling_diag_matrix = self.calib_matrix.to(self.device)
+        scaling_diag_matrix = whitening(self.calib_matrix)
         try:
             scaling_matrix_inv = torch.linalg.inv(scaling_diag_matrix)
         except Exception:

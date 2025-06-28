@@ -11,7 +11,28 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 
-SVDModel.compress(model, tokenizer, ratio=0.6, svd_version="v1", device=device)
+# all linear layers will be compressed at ratio
+# ratio = 0.6
+
+# all model.layers.*.mlp.down/up/gate_proj will be compressed at ratio
+ratio = {
+    "mlp.down_proj": 0.6,
+    "mlp.up_proj": 0.6,
+    "mlp.gate_proj": 0.6,
+}
+
+# all model.layers.*.mlp.down/up/gate_proj will be compressed at ratio 0.8 except model.layers.0
+ratio = {
+    "model.layers.0.mlp.down_proj": 0.6,
+    "model.layers.0.mlp.up_proj": 0.6,
+    "model.layers.0.mlp.gate_proj": 0.6,
+    "mlp.gate_proj": 0.2,
+    "mlp.up_proj": 0.2,
+    "mlp.down_proj": 0.2,
+}
+
+
+SVDModel.compress(model, tokenizer, ratio=ratio, svd_version="v1", device=device)
 
 
 inputs = tokenizer("Hello, this is a test.", return_tensors="pt").to(device)

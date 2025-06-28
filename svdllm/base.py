@@ -1,5 +1,5 @@
 from os.path import join as pjoin
-from typing import Callable
+from typing import Callable, Union
 import torch
 import torch.nn as nn
 from tqdm import tqdm
@@ -27,13 +27,23 @@ def is_svd_module(module) -> bool:
     return type(module) in _SVD_MODULES
 
 
+def name_to_linear_tag(name: str) -> str:
+    return ".".join(
+        [
+            n
+            for n in name.split(".")
+            if ((n not in ["model", "layers"]) and (not n.isnumeric()))
+        ]
+    )
+
+
 class SVDModel:
     @classmethod
     def compress(
         cls,
         model,
         tokenizer,
-        ratio: float,
+        ratio: Union[float, dict],
         calib_dataset: str = "wikitext2",
         nsamples: int = 256,
         seqlen: int = 2048,
@@ -54,10 +64,22 @@ class SVDModel:
         def _patch_linear(linear_layer, matrix=None):
             if type(linear_layer) in _SVD_MODULES:
                 return linear_layer
+
+            layer_ratio = None
+            if type(ratio) is dict:
+                if linear_layer.name in ratio:
+                    layer_ratio = ratio[linear_layer.name]
+                elif name_to_linear_tag(linear_layer.name) in ratio:
+                    layer_ratio = ratio[name_to_linear_tag(linear_layer.name)]
+                else:
+                    return linear_layer
+            else:
+                layer_ratio = ratio
+
             out_module = SVDLinear(
                 linear_layer,
                 matrix,
-                ratio,
+                layer_ratio,
                 svd_version=svd_version,
                 compute_dtype=compute_dtype,
                 device=device,
@@ -151,40 +173,12 @@ class SVDModel:
                 module._forward_hooks.clear()
         profiling_mat = {}
 
-        if svd_version == "v1":
-            for i in tqdm(range(len(layers)), desc="Whitening data"):
-                layer_profile = {}
-                subset = find_layers(layers[i])
-                for name in subset:
-                    raw_scaling_diag_matrix = (
-                        subset[name].raw_scaling_diag_matrix.double().to(device)
-                    )
-                    try:
-                        scaling_diag_matrix = torch.linalg.cholesky(
-                            raw_scaling_diag_matrix
-                        )
-                    except Exception:
-                        # print("Warning: eigen scaling_diag_matrix is not positive!")
-                        eigenvalues = torch.linalg.eigvalsh(raw_scaling_diag_matrix)
-                        raw_scaling_diag_matrix += (-eigenvalues[0] + 1e-6) * torch.eye(
-                            raw_scaling_diag_matrix.shape[0]
-                        ).to(device)
-                        scaling_diag_matrix = torch.linalg.cholesky(
-                            raw_scaling_diag_matrix
-                        )
-                        eigenvalues = None
-                        del eigenvalues
-                    layer_profile[name] = scaling_diag_matrix
-                profiling_mat[i] = layer_profile
-        elif svd_version == "v2":
-            for i in range(len(layers)):
-                layer_profile = {}
-                subset = find_layers(layers[i])
-                for name in subset:
-                    layer_profile[name] = subset[name].raw_scaling_diag_matrix
-                profiling_mat[i] = layer_profile
-        else:
-            raise ValueError("svd_version must be 1 or 2")
+        for i in range(len(layers)):
+            layer_profile = {}
+            subset = find_layers(layers[i])
+            for name in subset:
+                layer_profile[name] = subset[name].raw_scaling_diag_matrix
+            profiling_mat[i] = layer_profile
         return profiling_mat
 
     @classmethod
